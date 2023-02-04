@@ -4,86 +4,84 @@ import getopt
 import re
 import datetime
 import threading
+import shutil
+import concurrent.futures
 
+from exif import Image
 from pathlib import Path
 from dataclasses import dataclass
 from enum import auto
 
 # Own lib
-from processors.eventinc import process_eventinc_file
+#from processors.eventinc import process_eventinc_file
 
 
 class FILE_PATTERNS:
-    EVENT_INC               = "^EventInc_\d{4}-\d{2}-\d{2}\.uat\.zip$"
+    PHOTO               = ["^.*\.JPG$", "^.*\.PNG$"]
 
 
 class TEXT:
     EMPTY                   = ""
-    APPLICATION_TITLE       = "EventInc processor"
+    APPLICATION_TITLE       = "Photo Renamer"
     FILE_PROCESSED          = "Processed"
     FILE_QUEUED             = "Queued"
 
 
 class KEY:
     FILE_LIST               = "-FILE_LIST-"
-    INC_INPUT_PATH          = "-RESULT_FILE-"
-    INC_INPUT_PATH_BTN      = "-RESULT_FILE_BTN-"
-    INC_OUTPUT_PATH         = "-OUTPUT_PATH-"
-    INC_OUTPUT_PATH_BTN     = "-OUTPUT_PATH_BTN-"
-    REQUEST_FILES_RTN       = "-REQUEST_FILES_RTN-"
+    PHOTO_INPUT_PATH          = "-RESULT_FILE-"
+    PHOTO_INPUT_PATH_BTN      = "-RESULT_FILE_BTN-"
+    PHOTO_OUTPUT_PATH         = "-OUTPUT_PATH-"
+    PHOTO_OUTPUT_PATH_BTN     = "-OUTPUT_PATH_BTN-"
+    REQUEST_FILES_BTN       = "-REQUEST_FILES_BTN-"
     REQUEST_FILES_RESULT    = "-REQUEST_FILES_RESULT-"
     PROCESS_SEL_BTN         = "-PROCESS_SELECTED_BTN-"
+    PROCESS_ALL_BTN         = "-PROCESS_ALL_BTN-"
     PROCESS_SEL_RESULT      = "-PROCESS_SELECTED_RESULT-"
     TABLE_STATUS            = "-TABLE_STATUS-"
     DEBUG_OUTPUT            = "-DEBUG_OUTPUT-"
 
 
 
-def do_list_inc_files(window, inc_input_path:Path, inc_base_path:Path):
+def do_list_photos(photo_input_path:Path, photo_out_path:Path):
+    global base_path
+    photo_input_path = Path(photo_input_path)
     
-    inc_input_path = Path(inc_input_path)
-    inc_success_path = Path(inc_base_path) / "Status" / "EventInc"
+    photos = list()
+    for photo in photo_input_path.iterdir():
+        if photo.is_dir():
+            somePhotos = do_list_photos(photo, photo_out_path)
+            photos.extend(somePhotos)
+        for file_type in FILE_PATTERNS.PHOTO:
+            if re.match(file_type, photo.name, re.IGNORECASE):
+                photos.append([photo.__str__()[len(base_path) + 1:], TEXT.EMPTY])
+                break
 
-    inc_files = list()
-    for inc_file in inc_input_path.iterdir():
-        if re.match(FILE_PATTERNS.EVENT_INC, inc_file.name, re.IGNORECASE):
-            
-            inc_success_file = inc_success_path / f"{inc_file.name}.success"
-
-            if inc_success_file.exists() \
-            and inc_success_file.is_file():
-                inc_files.append([inc_file.name, TEXT.FILE_PROCESSED])
-            else:
-                inc_files.append([inc_file.name, TEXT.EMPTY])
+    return photos
 
 
-    # Post result event to main thread
-    window.write_event_value(KEY.REQUEST_FILES_RESULT, inc_files)
-
-
-def do_process_inc_files(inc_input_path:Path, inc_base_path:Path, selected_inc_files:list):
+def do_process_photos(photos_input_path:Path, photos_base_path:Path, selected_photos_files:list):
     global window
 
-    def event_procgress_callback(inc_file, value):
-        window.write_event_value(KEY.PROCESS_SEL_RESULT, [inc_file, f"{round(value * 100)}%"])
-
-    for inc_file in selected_inc_files:
-        process_eventinc_file(inc_input_path / inc_file, inc_base_path, event_procgress_callback)
+    for photo in selected_photos_files:
+        with open(photos_input_path.__str__() + "\\" + photo,'rb') as image:
+            photoTaken = Image(image).datetime.replace(":", "-") + "." + photo.split(".")[-1]
+        shutil.copy2(photos_input_path.__str__() + "\\" + photo, photos_base_path.__str__() + "\\" + photoTaken, follow_symlinks=True)
 
         # Post result event to main thread
-        window.write_event_value(KEY.PROCESS_SEL_RESULT, [inc_file, TEXT.FILE_PROCESSED])
+        window.write_event_value(KEY.PROCESS_SEL_RESULT, [photo, TEXT.FILE_PROCESSED])
 
     print("Done")    
 
 
 
 
-def get_table_row_id(table_content, inc_file_name):
+def get_table_row_id(table_content, photo_file_name):
     for index, row in enumerate(table_content):
 
         # Unpack the row to needed variables
         name, *_ = row
-        if name == inc_file_name:
+        if name == photo_file_name:
             return index
 
     
@@ -97,28 +95,29 @@ def print_event_data(event, values):
 
 
 
-def get_layout(def_inc_input_path, def_inc_base_path):
+def get_layout(def_photo_input_path, def_photo_result_path):
     # All the stuff inside your window.
     headings = [ 'File Name', 'Status' ]
     heading_widths = [60, 30]
 
     config_layout = [
         [
-            sg.Text('EventInc source path: ', size=(13, 1)), 
-            sg.InputText(def_inc_input_path, size=(100, 1), key=KEY.INC_INPUT_PATH, readonly=True, enable_events=False),
-            sg.FolderBrowse(enable_events=False, key=KEY.INC_INPUT_PATH_BTN, initial_folder=def_inc_input_path)
+            sg.Text('Photo source path: ', size=(14, 1)), 
+            sg.InputText(def_photo_input_path, size=(100, 1), key=KEY.PHOTO_INPUT_PATH, readonly=True, enable_events=False),
+            sg.FolderBrowse(enable_events=False, key=KEY.PHOTO_INPUT_PATH_BTN, initial_folder=def_photo_input_path)
         ],
         [
-            sg.Text('ODBS Data path: ', size=(13, 1)), 
-            sg.InputText(def_inc_base_path, size=(100, 1), key=KEY.INC_OUTPUT_PATH, readonly=True, enable_events=False),
-            sg.FolderBrowse(enable_events=False, key=KEY.INC_OUTPUT_PATH_BTN, initial_folder=def_inc_base_path)
+            sg.Text('Resulting path: ', size=(14, 1)), 
+            sg.InputText(def_photo_result_path, size=(100, 1), key=KEY.PHOTO_OUTPUT_PATH, readonly=True, enable_events=False),
+            sg.FolderBrowse(enable_events=False, key=KEY.PHOTO_OUTPUT_PATH_BTN, initial_folder=def_photo_result_path)
         ]
     ]
 
     actions_layout = [
         [
-            sg.Button('List files', key=KEY.REQUEST_FILES_RTN), 
-            sg.Button('Process selection', key=KEY.PROCESS_SEL_BTN)
+            sg.Button('List photos', key=KEY.REQUEST_FILES_BTN), 
+            sg.Button('Rename selection', key=KEY.PROCESS_SEL_BTN),
+            sg.Button('Rename all', key=KEY.PROCESS_ALL_BTN),
         ]
     ]
 
@@ -137,27 +136,29 @@ def get_layout(def_inc_input_path, def_inc_base_path):
 def set_button_status(disable:bool=False):
     global window
 
-    window[KEY.INC_INPUT_PATH_BTN].update(disabled=disable)
-    window[KEY.INC_OUTPUT_PATH_BTN].update(disabled=disable)
+    window[KEY.PHOTO_INPUT_PATH_BTN].update(disabled=disable)
+    window[KEY.PHOTO_OUTPUT_PATH_BTN].update(disabled=disable)
 
-    window[KEY.REQUEST_FILES_RTN].update(disabled=disable)
+    window[KEY.REQUEST_FILES_BTN].update(disabled=disable)
     window[KEY.PROCESS_SEL_BTN].update(disabled=disable)
+    window[KEY.PROCESS_ALL_BTN].update(disabled=disable)
 
 
 
-def exec_app(def_inc_input_path, def_inc_base_path):
+def exec_app(def_photo_input_path, def_photo_result_path):
     global window
-
+    global base_path
 
     # Create the Window
     #sg.theme('Default1')   # Add a touch of color
     #sg.theme_previewer()
-    window = sg.Window(TEXT.APPLICATION_TITLE, get_layout(def_inc_input_path, def_inc_base_path), finalize=True)
+    window = sg.Window(TEXT.APPLICATION_TITLE, get_layout(def_photo_input_path, def_photo_result_path), finalize=True)
 
     # Event Loop to process "events" and get the "values" of the inputs
     while True:
         # Read events
         event, values = window.read()
+        base_path = values[KEY.PHOTO_INPUT_PATH]
 
 
         # if user closes window break the loop
@@ -165,41 +166,44 @@ def exec_app(def_inc_input_path, def_inc_base_path):
             break
 
 
-        # Get the file list from SJ FTP server
-        elif event == KEY.REQUEST_FILES_RTN:
-            """ Here the list of EventInc files are requested """
+        # Get the photo list
+        elif event == KEY.REQUEST_FILES_BTN:
+            """ Here the list of photos are requested """
 
             #set_button_status(disable=True)
 
-            if KEY.INC_INPUT_PATH not in values:
+            if KEY.PHOTO_INPUT_PATH not in values:
                 print("No file selected")
                 continue
     
-            inc_input_path = values[KEY.INC_INPUT_PATH]
-            inc_base_path = values[KEY.INC_OUTPUT_PATH]
+            photo_input_path = values[KEY.PHOTO_INPUT_PATH]
+            photo_out_path = values[KEY.PHOTO_OUTPUT_PATH]
 
 
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(do_list_photos, photo_input_path, photo_out_path)
+                photos = future.result()
             
-            threading.Thread(target=do_list_inc_files, args=[window, inc_input_path, inc_base_path], daemon=True).start()                
-            print(f"Looking for EventInc files")
+            # Post result event to main thread
+            window.write_event_value(KEY.REQUEST_FILES_RESULT, photos)              
+            print(f"Looking for photos")
         
 
 
-        # Get the file list from SJ FTP server
+        # Get the photo list
         elif event == KEY.REQUEST_FILES_RESULT:
 
             #set_button_status(disable=False)
 
-            selected_inc_files = sorted(values[KEY.REQUEST_FILES_RESULT], reverse=True)
+            selected_photos = sorted(values[KEY.REQUEST_FILES_RESULT], reverse=True)
             print(f"Populating file list")
 
 
             # Update table status
-            window[KEY.TABLE_STATUS].update(f'{len(selected_inc_files)} file(s)')
+            window[KEY.TABLE_STATUS].update(f'{len(selected_photos)} file(s)')
 
             # Add the filtered list of files filtered on train name
-            #window[KEYS.FILELIST].update(sorted(filtered_files, key=lambda item: item[1]))
-            window[KEY.FILE_LIST].update(selected_inc_files)
+            window[KEY.FILE_LIST].update(selected_photos)
 
             print(f"Done")
 
@@ -207,38 +211,46 @@ def exec_app(def_inc_input_path, def_inc_base_path):
         elif event in KEY.PROCESS_SEL_BTN:
 
             # Get all selected file names (column 0) from the table
-            selected_inc_files = [window[KEY.FILE_LIST].Values[idx][0] for idx in values[KEY.FILE_LIST]]
+            selected_photos = [window[KEY.FILE_LIST].Values[idx][0] for idx in values[KEY.FILE_LIST]]
 
-            print(f"Processing {len(selected_inc_files)} file(s)")
+            print(f"Processing {len(selected_photos)} file(s)")
 
             # Get directories
-            inc_input_path = Path(values[KEY.INC_INPUT_PATH])
-            inc_base_path =  Path(values[KEY.INC_OUTPUT_PATH])
-            inc_output_path = Path(values[KEY.INC_OUTPUT_PATH]) / "Project" / "SJ_X2U"
-            inc_success_path = Path(values[KEY.INC_OUTPUT_PATH]) / "Status" / "EventInc"
+            photo_input_path = Path(values[KEY.PHOTO_INPUT_PATH])
+            photo_output_path = Path(values[KEY.PHOTO_OUTPUT_PATH])
 
-
-            if not inc_output_path.exists():
-                print(f"Output directory don't exists: {inc_output_path}")
+            if not photo_output_path.exists():
+                print(f"Output directory doesn't exist: {photo_output_path}")
                 continue
 
-            if not inc_success_path.exists():
-                print(f"Success directory don't exists: {inc_success_path}")
-                continue
-
-            # Check that there are any files to download
-            if len(selected_inc_files) == 0:
+            # Check that there are any photos to rename
+            if len(selected_photos) == 0:
                 print(f"No files to process")
                 continue
 
-            table_content = window[KEY.FILE_LIST].Values
-            for inc_file in selected_inc_files:
-                idx = get_table_row_id(table_content, inc_file)
-                table_content[idx][1] = TEXT.FILE_QUEUED
+            threading.Thread(target=do_process_photos, args=[photo_input_path, photo_output_path, selected_photos], daemon=True).start()     
+                   
+        elif event in KEY.PROCESS_ALL_BTN:
 
+            # Get all file names from the table
+            all_photos = [window[KEY.FILE_LIST].Values[idx][0] for idx in range(len(window[KEY.FILE_LIST].Values))]
 
-            threading.Thread(target=do_process_inc_files, args=[inc_input_path, inc_base_path, selected_inc_files], daemon=True).start()                
+            print(f"Processing {len(all_photos)} file(s)")
 
+            # Get directories
+            photo_input_path = Path(values[KEY.PHOTO_INPUT_PATH])
+            photo_output_path = Path(values[KEY.PHOTO_OUTPUT_PATH])
+
+            if not photo_output_path.exists():
+                print(f"Output directory doesn't exist: {photo_output_path}")
+                continue
+
+            # Check that there are any photos to rename
+            if len(all_photos) == 0:
+                print(f"No files to process")
+                continue
+
+            threading.Thread(target=do_process_photos, args=[photo_input_path, photo_output_path, all_photos], daemon=True).start()  
 
         elif event == KEY.PROCESS_SEL_RESULT:
 
@@ -275,8 +287,8 @@ def print_help(app_name):
 
     print("usage: {} [options]".format(app_name))
     print("Options:")
-    print("-i        : EventInc source folder")
-    print("-o        : EventInc data folder")
+    print("-i        : Photo source folder")
+    print("-o        : Photo data folder")
     print("-h        : help")
 
 
@@ -287,8 +299,8 @@ if __name__ == "__main__":
     # Init of needed objcts
     # --------------------
 
-    def_inc_input_dir = None
-    def_inc_base_dir = None
+    def_inc_input_dir = None #"C:\\Users\\Mattias\\PhotoRenamer\\ToPlayWith\\202301__"
+    def_inc_base_dir = None #"C:\\Users\\Mattias\\PhotoRenamer\\Result"
 
 
     # --------------------
@@ -309,7 +321,7 @@ if __name__ == "__main__":
 
 
     # --------------------
-    # Coolect all data from arguments
+    # Collect all data from arguments
     # --------------------
 
     for option, value in opts:
