@@ -2,18 +2,14 @@ import PySimpleGUI as sg
 import sys
 import getopt
 import re
-import datetime
 import threading
 import shutil
 import concurrent.futures
+import os
 
 from exif import Image
 from pathlib import Path
 from dataclasses import dataclass
-from enum import auto
-
-# Own lib
-#from processors.eventinc import process_eventinc_file
 
 
 class FILE_PATTERNS:
@@ -65,7 +61,11 @@ def do_process_photos(photos_input_path:Path, photos_base_path:Path, selected_ph
 
     for photo in selected_photos_files:
         with open(photos_input_path.__str__() + "\\" + photo,'rb') as image:
-            photoTaken = Image(image).datetime.replace(":", "-") + "." + photo.split(".")[-1]
+            try:
+                photoTaken = Image(image).datetime.replace(":", "-") + "." + photo.split(".")[-1]
+            except KeyError:
+                print("No data when photo was taken for photo " + photo)
+                continue
         shutil.copy2(photos_input_path.__str__() + "\\" + photo, photos_base_path.__str__() + "\\" + photoTaken, follow_symlinks=True)
 
         # Post result event to main thread
@@ -299,8 +299,8 @@ if __name__ == "__main__":
     # Init of needed objcts
     # --------------------
 
-    def_inc_input_dir = None #"C:\\Users\\Mattias\\PhotoRenamer\\ToPlayWith\\202301__"
-    def_inc_base_dir = None #"C:\\Users\\Mattias\\PhotoRenamer\\Result"
+    def_inc_input_dir = None
+    def_inc_base_dir = None
 
 
     # --------------------
@@ -341,9 +341,13 @@ if __name__ == "__main__":
             input("Press any key to continue.")
             sys.exit(0)
 
+    if def_inc_input_dir == None:
+        def_inc_input_dir = os.getcwd()
+    if def_inc_base_dir == None:
+        def_inc_base_dir = os.getcwd()
 
     # --------------------
-    # Run EventInc processor
+    # Run Photo renamer
     # --------------------
 
     exec_app(def_inc_input_dir, def_inc_base_dir)
