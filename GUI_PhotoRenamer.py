@@ -30,6 +30,7 @@ class KEY:
     PHOTO_OUTPUT_PATH         = "-OUTPUT_PATH-"
     PHOTO_OUTPUT_PATH_BTN     = "-OUTPUT_PATH_BTN-"
     REQUEST_FILES_BTN       = "-REQUEST_FILES_BTN-"
+    COPYORMOVE_OPTION       = "-COPYORMOVE_OPTION-"
     REQUEST_FILES_RESULT    = "-REQUEST_FILES_RESULT-"
     PROCESS_SEL_BTN         = "-PROCESS_SELECTED_BTN-"
     PROCESS_ALL_BTN         = "-PROCESS_ALL_BTN-"
@@ -56,17 +57,22 @@ def do_list_photos(photo_input_path:Path, photo_out_path:Path):
     return photos
 
 
-def do_process_photos(photos_input_path:Path, photos_base_path:Path, selected_photos_files:list):
+def do_process_photos(photos_input_path:Path, photos_base_path:Path, selected_photos_files:list, action):
     global window
 
     for photo in selected_photos_files:
         with open(photos_input_path.__str__() + "\\" + photo,'rb') as image:
             try:
                 photoTaken = Image(image).datetime.replace(":", "-") + "." + photo.split(".")[-1]
-            except KeyError:
+            except:
                 print("No data when photo was taken for photo " + photo)
                 continue
-        shutil.copy2(photos_input_path.__str__() + "\\" + photo, photos_base_path.__str__() + "\\" + photoTaken, follow_symlinks=True)
+        newPhoto = photos_base_path.__str__() + "\\" + photoTaken
+        oldPhoto = photos_input_path.__str__() + "\\" + photo
+        if action == "Copy and rename":
+            shutil.copy2(oldPhoto, newPhoto, follow_symlinks=True)
+        elif action == "Move and rename":
+            shutil.move(oldPhoto, newPhoto)
 
         # Post result event to main thread
         window.write_event_value(KEY.PROCESS_SEL_RESULT, [photo, TEXT.FILE_PROCESSED])
@@ -120,10 +126,16 @@ def get_layout(def_photo_input_path, def_photo_result_path):
             sg.Button('Rename all', key=KEY.PROCESS_ALL_BTN),
         ]
     ]
+    options_layout = [
+        [
+            sg.Combo(['Copy and rename', 'Move and rename'], default_value = 'Copy and rename', readonly = True, key=KEY.COPYORMOVE_OPTION)
+        ]
+    ]
 
     layout = [ 
         [ sg.Frame('Configuration', config_layout, key='-FRAME_CONFIG-') ],
         [ sg.Frame('Actions', actions_layout, key='-FRAME_ACTIOS-') ],
+        [ sg.Frame('Options', options_layout, key='-FRAME_OPTIONS-') ],
         [ sg.Table([], size=(100,30), col_widths = heading_widths, expand_x=True, headings=headings, justification='left', key=KEY.FILE_LIST, auto_size_columns=False) ],
         [sg.Text('0 file(s)', key=KEY.TABLE_STATUS)], 
         [sg.Text('Debug output: ')], 
@@ -228,7 +240,7 @@ def exec_app(def_photo_input_path, def_photo_result_path):
                 print(f"No files to process")
                 continue
 
-            threading.Thread(target=do_process_photos, args=[photo_input_path, photo_output_path, selected_photos], daemon=True).start()     
+            threading.Thread(target=do_process_photos, args=[photo_input_path, photo_output_path, selected_photos, values[KEY.COPYORMOVE_OPTION]], daemon=True).start()     
                    
         elif event in KEY.PROCESS_ALL_BTN:
 
@@ -250,7 +262,7 @@ def exec_app(def_photo_input_path, def_photo_result_path):
                 print(f"No files to process")
                 continue
 
-            threading.Thread(target=do_process_photos, args=[photo_input_path, photo_output_path, all_photos], daemon=True).start()  
+            threading.Thread(target=do_process_photos, args=[photo_input_path, photo_output_path, all_photos, values[KEY.COPYORMOVE_OPTION]], daemon=True).start()  
 
         elif event == KEY.PROCESS_SEL_RESULT:
 
